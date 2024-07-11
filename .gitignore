@@ -1,0 +1,5 @@
+.venv
+*.ufo
+*.otf
+*.ttf
+*.glyphs
