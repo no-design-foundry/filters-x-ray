@@ -3,3 +3,5 @@
 *.otf
 *.ttf
 *.glyphs
+__pycache__
+.DS_Store
