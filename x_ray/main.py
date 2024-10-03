@@ -48,8 +48,6 @@ def main(font, scale_factor):
     axis_handle.tag = "HAND"
     doc.addAxis(axis_handle)
 
-
-
     # line width, point size, handle size
     for line_width in [axis_line.minimum, axis_line.maximum]:
         for point_size in [axis_point.minimum, axis_point.maximum]:
@@ -66,7 +64,7 @@ def main(font, scale_factor):
 
 
 if __name__ == "__main__":
-    font = Font("/Users/jansindler/Desktop/font.ufo")
+    font = Font("./arial_full.ufo")
     new_upm =  16_384
     scale_factor = new_upm / font.info.unitsPerEm
     for glyph in font:
@@ -81,7 +79,7 @@ if __name__ == "__main__":
     
     import cProfile, pstats
     from datetime import datetime
-    PROFILE =  not True
+    PROFILE = not True
 
     
     if PROFILE:
