@@ -7,10 +7,10 @@ from fontTools.colorLib import builder
 def hex_to_Color(value):
     value = value.lstrip("#")
     r, g, b, *a = tuple(int(value[i:i + 2], 16) for i in range(0, len(value), 2))
-    print(r, g, b, a)
     return Color(red=r, green=g, blue=b, alpha=a[0] if a else 255)
 
-def colorize(tt_font, glyph_order, outline_color, line_color, point_color, background_color="#0000000F"):
+# 0000000F
+def colorize(tt_font, glyph_order, outline_color, line_color, point_color, background_color="#FFFFFFFF"):
 # Create and populate the CPAL table
     cpal = newTable('CPAL')
     cpal.version = 0
