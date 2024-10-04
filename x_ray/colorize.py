@@ -10,8 +10,7 @@ def hex_to_Color(value):
     return Color(red=r, green=g, blue=b, alpha=a[0] if a else 255)
 
 # 0000000F
-def colorize(tt_font, glyph_order, outline_color, line_color, point_color, background_color="#FFFFFFFF"):
-# Create and populate the CPAL table
+def colorize(tt_font, glyph_order, outline_color, line_color, point_color, background_color="#00000010"):
     cpal = newTable('CPAL')
     cpal.version = 0
     cpal.numPaletteEntries = 4
@@ -28,24 +27,16 @@ def colorize(tt_font, glyph_order, outline_color, line_color, point_color, backg
     # Create and populate the COLR table
 
     color_layer_lists = {}
-    suffixes = [(0, "_bounds"), (1, "_outlined"), (2, "_lines"), (3, "_handles")]
-    filled_suffixes = [(0, "_bounds"), (1, ".filled"), (2, "_lines"), (3, "_handles")]
-    rounded_suffixes = [(0, "_bounds"), (1, "_outlined"), (2, "_lines"), (3, "_rounded_point")]
-    no_bg_suffixes = [(1, "_outlined"), (2, "_lines"), (3, "_handles")]
-    rounded_no_bg_suffixes = [(1, "_outlined"), (2, "_lines"), (3, "_rounded_point")]
+    suffixes = [(1, "_outlined"), (2, "_lines"), (3, "_handles")]
+    filled_suffixes = [(1, ".filled"), (2, "_lines"), (3, "_handles")]
+    bounds_suffixes = [(0, "_bounds"), (1, "_outlined"), (2, "_lines"), (3, "_handles")]
+    bounds_filled_suffixes = [(0, "_bounds"), (1, ".filled"), (2, "_lines"), (3, "_handles")]
 
     for glyph_name in glyph_order:
-        if glyph_name.endswith(".no-bg") or glyph_name.endswith(".rounded"):
-            continue
-        if glyph_name.endswith("_lines") or glyph_name.endswith("_handles") or glyph_name.endswith("_bounds") or glyph_name.endswith("_rounded_point"):
-            continue
-        if glyph_name in ["handle", "point", "rounded_point"]:
-            continue
         color_layer_lists[glyph_name] = [(glyph_name + suffix, index) for index, suffix in suffixes]
         color_layer_lists[f"{glyph_name}.filled"] = [(glyph_name + suffix, index) for index, suffix in filled_suffixes]
-        color_layer_lists[f"{glyph_name}.rounded"] = [(glyph_name + suffix, index) for index, suffix in rounded_suffixes]
-        color_layer_lists[f"{glyph_name}.no-bg"] = [(glyph_name + suffix, index) for index, suffix in no_bg_suffixes]
-        color_layer_lists[f"{glyph_name}.rounded.no-bg"] = [(glyph_name + suffix, index) for index, suffix in rounded_no_bg_suffixes]
+        color_layer_lists[f"{glyph_name}.bounds"] = [(glyph_name + suffix, index) for index, suffix in bounds_suffixes]
+        color_layer_lists[f"{glyph_name}.bounds.filled"] = [(glyph_name + suffix, index) for index, suffix in bounds_filled_suffixes]
 
 
     colr = builder.buildCOLR(color_layer_lists)
