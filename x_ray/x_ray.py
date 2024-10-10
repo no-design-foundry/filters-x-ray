@@ -522,15 +522,18 @@ def main():
 	x_rayed_ufo.save(ufo_path.parent/output_file_name)
 
 if __name__ == "__main__":
+	from datetime import datetime
 	import cProfile
 	import pstats
-	profiler = cProfile.Profile()
-	profiler.enable()
+	start = datetime.now()
+	# profiler = cProfile.Profile()
+	# profiler.enable()
 	main()
-	profiler.disable()
-	stats = pstats.Stats(profiler)
-	stats.sort_stats(pstats.SortKey.TIME)
-	stats.print_stats(10)
+	# profiler.disable()
+	# stats = pstats.Stats(profiler)
+	# stats.sort_stats(pstats.SortKey.TIME)
+	# stats.print_stats(10)
+	print((datetime.now() - start).total_seconds())
 
 
 # normalized_glyph = Glyph()
