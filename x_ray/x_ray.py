@@ -5,6 +5,7 @@ from ufoLib2.objects.font import Font
 from ufoLib2.objects.point import Point
 from ufoLib2.objects.contour import Contour
 from ufoLib2.objects.glyph import Glyph
+from ufoLib2.objects.anchor import Anchor
 from ufoLib2.objects.component import Component
 from copy import deepcopy
 import numpy as np
@@ -28,32 +29,30 @@ except ImportError:
 def circle(layer, center, diameter, tension=1):
 	x, y = center
 	radius = diameter / 2
-	contour = Contour()
-	contour.points = [
-		Point(x - radius * tension, y + radius),
-		Point(x - radius, y + radius * tension),
-		Point(x - radius, y, "curve"),
-		Point(x - radius, y - radius * tension),
-		Point(x - radius * tension, y - radius),
-		Point(x, y - radius, "curve"),
-		Point(x + radius * tension, y - radius),
-		Point(x + radius, y - radius * tension),
-		Point(x + radius, y, "curve"),
-		Point(x + radius, y + radius * tension),
-		Point(x + radius * tension, y + radius),
-		Point(x, y + radius, "curve"),
+	contour = [
+		{"x": x - radius * tension, "y": y + radius, "type": None},
+		{"x": x - radius, "y": y + radius * tension, "type": None},
+		{"x": x - radius, "y": y, "type": "curve"},
+		{"x": x - radius, "y": y - radius * tension, "type": None},
+		{"x": x - radius * tension, "y": y - radius, "type": None},
+		{"x": x, "y": y - radius, "type": "curve"},
+		{"x": x + radius * tension, "y": y - radius, "type": None},
+		{"x": x + radius, "y": y - radius * tension, "type": None},
+		{"x": x + radius, "y": y, "type": "curve"},
+		{"x": x + radius, "y": y + radius * tension, "type": None},
+		{"x": x + radius * tension, "y": y + radius, "type": None},
+		{"x": x, "y": y + radius, "type": "curve"},
 	]
 	layer.contours.append(contour)
 
 
 def square(layer, center, size):
 	x, y = center
-	contour = Contour()
-	contour.points = [
-		Point(x - size / 2, y - size / 2, "line"),
-		Point(x + size / 2, y - size / 2, "line"),
-		Point(x + size / 2, y + size / 2, "line"),
-		Point(x - size / 2, y + size / 2, "line"),
+	contour = [
+		{"x": x - size / 2, "y":y - size / 2, "type": "line"},
+		{"x": x + size / 2, "y": y - size / 2, "type": "line"},
+		{"x": x + size / 2, "y": y + size / 2, "type": "line"},
+		{"x": x - size / 2, "y": y + size / 2, "type": "line"},
 	]
 	layer.contours.append(contour)
 
@@ -74,15 +73,13 @@ def line_shape(output_glyph, point_a, point_b, thickness):
 	x_offset = cos(angle) * thickness / 2
 	y_offset = sin(angle) * thickness / 2
 
-	point_objects = [
-		Point(x_a + x_offset, y_a + y_offset, "line"),
-		Point(x_b + x_offset, y_b + y_offset, "line"),
-		Point(x_b - x_offset, y_b - y_offset, "line"),
-		Point(x_a - x_offset, y_a - y_offset, "line"),
+	contour = [
+		{"x": x_a + x_offset, "y": y_a + y_offset, "type": "line"},
+		{"x": x_b + x_offset, "y": y_b + y_offset, "type": "line"},
+		{"x": x_b - x_offset, "y": y_b - y_offset, "type": "line"},
+		{"x": x_a - x_offset, "y": y_a - y_offset, "type": "line"},
 	]
 
-	contour = Contour()
-	contour.points = point_objects
 	output_glyph.contours.append(contour)
 
 
@@ -263,44 +260,115 @@ def duplicate_components(glyph_source, glyph_destination, suffix):
 	for component in glyph_source.components:
 		glyph_destination.components.append(Component(component.baseGlyph + suffix, component.transformation))
 
-def glyph_to_json(glyph):
-	contours = []
-	for contour in glyph.contours:
-		points = []
-		for point in contour.points:
-			points.append({
-				"x": point.x,
-				"y": point.y,
-				"type": point.type,
-			})
-		contours.append(points)
-	
-	anchors = []
-	for anchor in glyph.anchors:
-		anchors.append({
-			"x": anchor.x,
-			"y": anchor.y,
-			"name": anchor.name,
-		})
-	
-	json = {
-		"unicodes": glyph.unicodes,
-		"width": glyph.width,
-		"name": glyph.name,
-		"contours": contours,
-		"anchors": anchors,
-	}
-	return json
+def get_segments(points):
+	if not len(points):
+		return []
+	segments = [[]]
+	lastWasOffCurve = False
+	for point in points:
+		segments[-1].append(point)
+		if point["type"] is not None:
+			segments.append([])
+		lastWasOffCurve = point["type"] is None
+	if len(segments[-1]) == 0:
+		del segments[-1]
+	if lastWasOffCurve:
+		if len(segments) != 1:
+			lastSegment = segments[-1]
+			segment = segments.pop(0)
+			lastSegment.extend(segment)
+	elif segments[0][-1]["type"] != "move":
+		segment = segments.pop(0)
+		segments.append(segment)
+	return segments
+
+class PerformanceGlyph():
+	def __init__(self, glyph=None, name=None, width=0, unicodes=[]):
+		self.unicodes = glyph.unicodes if glyph else unicodes
+		self.width = glyph.width if glyph else width
+		self.name = glyph.name if glyph else name
+		self.contours = []
+		self.anchors = []
+		self.components = []
+		if glyph:
+			for contour in glyph.contours:
+				points = []
+				for point in contour.points:
+					points.append({
+						"x": point.x,
+						"y": point.y,
+						"type": point.type,
+					})
+				self.contours.append(points)
+
+			for anchor in glyph.anchors:
+				self.anchors.append({
+					"x": anchor.x,
+					"y": anchor.y,
+					"name": anchor.name,
+				})
+
+			for component in glyph.components:
+				self.components.append({
+					"baseGlyph": component.baseGlyph,
+					"transformation": component.transformation,
+				})
+
+	def copy(self):
+		copied = PerformanceGlyph(name=self.name, width=self.width, unicodes=self.unicodes)
+		copied.contours = deepcopy(self.contours)
+		copied.anchors = self.anchors
+		copied.components = self.components
+		return copied
+
+	def draw(self, pen):
+		for contour in self:
+			segments = get_segments(contour)
+			for s, segment in enumerate(segments):
+				segment_type = segment[-1]["type"]
+				segment_points = [(point["x"], point["y"]) for point in segment]
+				if s == 0:
+					pen.moveTo(segment_points[0])
+				if segment_type == "line":
+					pen.lineTo(*segment_points)
+				elif segment_type == "curve":
+					pen.curveTo(*segment_points)
+				else:
+					raise NotImplementedError(f"Unsupported segment type: {segment_type}")
+			pen.endPath()
+
+
+	def __iter__(self):
+		for contour in self.contours:
+			yield contour
+
+	def to_glyph(self, font):
+		glyph = font.newGlyph(self.name)
+		# self.draw(glyph.getPen())
+		for contour in self.contours:
+			contour_object = Contour()
+			for point in contour:
+				contour_object.points.append(Point(point["x"], point["y"], point["type"]))
+			glyph.contours.append(contour_object)
+		for anchor in self.anchors:
+			glyph.appendAnchor(Anchor(anchor["name"], (anchor["x"], anchor["y"])))
+		for component in self.components:
+			glyph.appendComponent(Component(component["baseGlyph"], component["transformation"]))
+		glyph.width = self.width
+
+
 	
 
 def x_ray_master(font, output_font, outline_width, line_width, point_size, handle_size):
 	output_font.info.unitsPerEm = font.info.unitsPerEm
 
-	handle = output_font.newGlyph("handle")
+	handle = PerformanceGlyph(name="handle")
 	circle(handle, (0, 0), handle_size, tension=0.55)
+	handle.to_glyph(output_font)
 
-	point = output_font.newGlyph("point")
+	point = PerformanceGlyph(name="point")
 	square(point, (0, 0), point_size)
+	point.to_glyph(output_font)
 
 	descender = font.info.descender
 	ascender = max(font.info.ascender, font.info.capHeight)
@@ -310,69 +378,17 @@ def x_ray_master(font, output_font, outline_width, line_width, point_size, handl
 	for glyph_name in font.keys():
 		if glyph_name in ["handle", "point"]:
 			continue
-		glyph = font[glyph_name]
-		
-		# json_glyph = glyph_to_json(glyph)
+		input_glyph = font[glyph_name]
 
-		ss_glyphs.append(glyph_name)
+		glyph = PerformanceGlyph(font[glyph_name])
 
-		bounds_glyph = output_font.newGlyph(glyph_name + "_bounds")
-		bounds_glyph.width = glyph.width
-
-		contour = Contour()
-		contour.points = [
-			Point(0, descender, "line"),
-			Point(glyph.width, descender, "line"),
-			Point(glyph.width, ascender, "line"),
-			Point(0, ascender, "line")
-			]
-		bounds_glyph.contours.append(contour)
-
-		output_glyph_handles = output_font.newGlyph(glyph_name + "_handles")
-		output_glyph_handles.width = glyph.width
-		duplicate_components(glyph, output_glyph_handles, "_handles")
-
-		output_glyph_handle_lines = output_font.newGlyph(glyph_name + "_lines")
-		output_glyph_handle_lines.width = glyph.width
-		duplicate_components(glyph, output_glyph_handle_lines, "_lines")
-
-		outlined_glyph = output_font.newGlyph(glyph_name + "_outlined")
-		outlined_glyph.width = glyph.width
-		duplicate_components(glyph, outlined_glyph, "_outlined")
-
-		output_glyph = output_font.newGlyph(glyph_name)
-		
-
-		# glyph.draw(outlined_glyph.getPen())
 		normalized_glyph = Glyph()
 		normalizing_pen = NormalizingPen(normalized_glyph.getPen())
-		glyph.draw(normalizing_pen)
-		normalized_glyph.draw(outlined_glyph.getPen())
-		outline_glyph(outlined_glyph, outline_width/2)
+		input_glyph.draw(normalizing_pen)
+		normalized_glyph = PerformanceGlyph(normalized_glyph)
 
-
-
-		inner_shape = Glyph()
-		outlined_glyph.draw(inner_shape.getPen())
-		outline_glyph(inner_shape, -outline_width/2)
-		reverse_contour_pen = ReverseContourPen(outlined_glyph.getPen())
-		inner_shape.draw(reverse_contour_pen)
-
-		filled_glyph = output_font.newGlyph(glyph_name + ".filled")
-		filled_glyph.width = glyph.width
-		duplicate_components(glyph, filled_glyph, ".filled")
-
-		filled_glyph.contours.extend(glyph.contours[::1])
-		# glyph.draw(filled_glyph.getPen())
-
-		output_font.newGlyph(glyph_name + ".bounds").width = glyph.width
-		output_font.newGlyph(glyph_name + ".bounds.filled").width = glyph.width
-
-		output_glyph.width = glyph.width
-		output_glyph.unicodes = glyph.unicodes
-
-		handle_line_layer = output_glyph_handle_lines
-		handle_layer = output_glyph_handles
+		handle_line_layer = PerformanceGlyph(name=f"{glyph.name}_lines")
+		handle_layer = PerformanceGlyph(name=f"{glyph.name}_handles")
 
 		x_ray_pen = XRayPen(
 			handle_line_layer,
@@ -386,7 +402,24 @@ def x_ray_master(font, output_font, outline_width, line_width, point_size, handl
 		)
 		glyph.draw(x_ray_pen)
 
-		output_glyph.contours.extend(handle_line_layer.contours + handle_layer.contours + outlined_glyph.contours) 
+		default_glyph = glyph.copy()
+		default_glyph.to_glyph(output_font)
+
+		handle_line_layer.to_glyph(output_font)
+		handle_layer.to_glyph(output_font)
+
+		outlined_glyph = PerformanceGlyph(name=f"{glyph.name}_outlined", width=glyph.width, unicodes=glyph.unicodes)
+
+		outlined_glyph_inner = normalized_glyph.copy()
+		outlined_glyph_outer = normalized_glyph.copy()
+
+		outline_glyph(outlined_glyph_inner, -outline_width)
+		outline_glyph(outlined_glyph_outer, outline_width)
+
+		outlined_glyph.contours = outlined_glyph_inner.contours + outlined_glyph_outer.contours
+		outlined_glyph.to_glyph(output_font)
+
+		# output_glyph.contours.extend(handle_line_layer.contours + handle_layer.contours + outlined_glyph.contours) 
 
 
 	for pair in font.kerning:
@@ -502,7 +535,7 @@ def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000
 	# for s, source in enumerate(doc.sources):
 	# 	source.font.save(f"/Users/js/Desktop/exports 2/ufo/debug/{s}.ufo")
 	compiled = compileVariableTTF(doc, optimizeGvar=False)
-	colorize(compiled, font.keys(), outline_color=outline_color, line_color=line_color, point_color=point_color)
+	# colorize(compiled, font.keys(), outline_color=outline_color, line_color=line_color, point_color=point_color)
 	return compiled
 
 def main():
@@ -522,15 +555,22 @@ def main():
 	x_rayed_ufo.save(ufo_path.parent/output_file_name)
 
 if __name__ == "__main__":
+	from datetime import datetime
 	import cProfile
 	import pstats
-	profiler = cProfile.Profile()
-	profiler.enable()
+	start = datetime.now()
+	
+	# profiler = cProfile.Profile()
+	# profiler.enable()
+	
 	main()
-	profiler.disable()
-	stats = pstats.Stats(profiler)
-	stats.sort_stats(pstats.SortKey.TIME)
-	stats.print_stats(10)
+	
+	# profiler.disable()
+	# stats = pstats.Stats(profiler)
+	# stats.sort_stats(pstats.SortKey.TIME)
+	# stats.print_stats(10)
+
+	print((datetime.now() - start).total_seconds())
 
 
 # normalized_glyph = Glyph()

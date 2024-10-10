@@ -6,8 +6,8 @@ def calculate_offset(coordinates, i, offset, num_points, first_point_offset=1):
     p2 = coordinates[(i + 1) % num_points]
 
     # Calculate vectors
-    v1 = (p0.x - p1.x, p0.y - p1.y)
-    v2 = (p2.x - p1.x, p2.y - p1.y)
+    v1 = (p0["x"] - p1["x"], p0["y"] - p1["y"])
+    v2 = (p2["x"] - p1["x"], p2["y"] - p1["y"])
 
     # Normalize vectors
     v1_length = math.sqrt(v1[0]**2 + v1[1]**2)
@@ -21,7 +21,7 @@ def calculate_offset(coordinates, i, offset, num_points, first_point_offset=1):
     
     if abs(cross_product) < 1e-10:
         # Handle collinear case
-        return (p1.x - offset * v1_normalized[1], p1.y + offset * v1_normalized[0])
+        return (p1["x"] - offset * v1_normalized[1], p1["y"] + offset * v1_normalized[0])
     
     bisector = (v1_normalized[0] + v2_normalized[0], v1_normalized[1] + v2_normalized[1])
     bisector_length = math.sqrt(bisector[0]**2 + bisector[1]**2)
@@ -32,7 +32,7 @@ def calculate_offset(coordinates, i, offset, num_points, first_point_offset=1):
     angle = math.atan2(cross_product, dot_product)
     factor = offset / math.sin(angle / 2)
 
-    return (p1.x + bisector_normalized[0] * factor, p1.y + bisector_normalized[1] * factor)
+    return (p1["x"] + bisector_normalized[0] * factor, p1["y"] + bisector_normalized[1] * factor)
 
 
 def get_simple_offsets(coordinates, offset):
@@ -59,7 +59,6 @@ def outline_glyph(glyph, offset_distance):
         offset = get_simple_offsets(contour, offset_distance)
         for p, point in enumerate(contour):
             x, y = offset[p]
-            point.x = int(x)
-            point.y = int(y)
-
+            point["x"] = int(x)
+            point["y"] = int(y)
 
