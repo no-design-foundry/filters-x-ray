@@ -23,7 +23,7 @@ except ImportError:
 	from outline_glyph import outline_glyph
 	from normalizing_pen import NormalizingPen
 	from colorize import colorize
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def circle(layer, center, diameter, tension=1):
 	x, y = center
@@ -261,135 +261,6 @@ def duplicate_components(glyph_source, glyph_destination, suffix):
 	for component in glyph_source.components:
 		glyph_destination.components.append(Component(component.baseGlyph + suffix, component.transformation))
 
-def glyph_to_json(glyph):
-	contours = []
-	for contour in glyph.contours:
-		points = []
-		for point in contour.points:
-			points.append({
-				"x": point.x,
-				"y": point.y,
-				"type": point.type,
-			})
-		contours.append(points)
-	
-	anchors = []
-	for anchor in glyph.anchors:
-		anchors.append({
-			"x": anchor.x,
-			"y": anchor.y,
-			"name": anchor.name,
-		})
-	
-	json = {
-		"unicodes": glyph.unicodes,
-		"width": glyph.width,
-		"name": glyph.name,
-		"contours": contours,
-		"anchors": anchors,
-	}
-	return json
-	
-
-# def x_ray_master(font, output_font, outline_width, line_width, point_size, handle_size):
-# 	output_font.info.unitsPerEm = font.info.unitsPerEm
-
-# 	handle = output_font.newGlyph("handle")
-# 	circle(handle, (0, 0), handle_size, tension=0.55)
-
-# 	point = output_font.newGlyph("point")
-# 	square(point, (0, 0), point_size)
-
-# 	descender = font.info.descender
-# 	ascender = max(font.info.ascender, font.info.capHeight)
-
-# 	ss_glyphs = []
-	
-# 	for glyph_name in font.keys():
-# 		if glyph_name in ["handle", "point"]:
-# 			continue
-# 		glyph = font[glyph_name]
-		
-# 		# json_glyph = glyph_to_json(glyph)
-
-# 		ss_glyphs.append(glyph_name)
-
-# 		bounds_glyph = output_font.newGlyph(glyph_name + "_bounds")
-# 		bounds_glyph.width = glyph.width
-
-# 		contour = Contour()
-# 		contour.points = [
-# 			Point(0, descender, "line"),
-# 			Point(glyph.width, descender, "line"),
-# 			Point(glyph.width, ascender, "line"),
-# 			Point(0, ascender, "line")
-# 			]
-# 		bounds_glyph.contours.append(contour)
-
-# 		output_glyph_handles = output_font.newGlyph(glyph_name + "_handles")
-# 		output_glyph_handles.width = glyph.width
-# 		duplicate_components(glyph, output_glyph_handles, "_handles")
-
-# 		output_glyph_handle_lines = output_font.newGlyph(glyph_name + "_lines")
-# 		output_glyph_handle_lines.width = glyph.width
-# 		duplicate_components(glyph, output_glyph_handle_lines, "_lines")
-
-# 		outlined_glyph = output_font.newGlyph(glyph_name + "_outlined")
-# 		outlined_glyph.width = glyph.width
-# 		duplicate_components(glyph, outlined_glyph, "_outlined")
-
-# 		output_glyph = output_font.newGlyph(glyph_name)
-		
-
-# 		# glyph.draw(outlined_glyph.getPen())
-# 		normalized_glyph = Glyph()
-# 		normalizing_pen = NormalizingPen(normalized_glyph.getPen())
-# 		glyph.draw(normalizing_pen)
-# 		normalized_glyph.draw(outlined_glyph.getPen())
-# 		outline_glyph(outlined_glyph, outline_width/2)
-
-
-
-# 		inner_shape = Glyph()
-# 		outlined_glyph.draw(inner_shape.getPen())
-# 		outline_glyph(inner_shape, -outline_width/2)
-# 		reverse_contour_pen = ReverseContourPen(outlined_glyph.getPen())
-# 		inner_shape.draw(reverse_contour_pen)
-
-# 		filled_glyph = output_font.newGlyph(glyph_name + ".filled")
-# 		filled_glyph.width = glyph.width
-# 		duplicate_components(glyph, filled_glyph, ".filled")
-
-# 		filled_glyph.contours.extend(glyph.contours[::1])
-# 		glyph.draw(filled_glyph.getPen())
-
-# 		output_font.newGlyph(glyph_name + ".bounds").width = glyph.width
-# 		output_font.newGlyph(glyph_name + ".bounds.filled").width = glyph.width
-
-# 		output_glyph.width = glyph.width
-# 		output_glyph.unicodes = glyph.unicodes
-
-# 		handle_line_layer = output_glyph_handle_lines
-# 		handle_layer = output_glyph_handles
-
-# 		x_ray_pen = XRayPen(
-# 			handle_line_layer,
-# 			handle_layer,
-# 			line_width=line_width,
-# 			point_size=point_size,
-# 			handle_size=handle_size,
-# 			use_components=False,
-# 			handle_component_name="handle",
-# 			point_component_name="point",
-# 		)
-# 		glyph.draw(x_ray_pen)
-
-# 		output_glyph.contours.extend(handle_line_layer.contours + handle_layer.contours + outlined_glyph.contours) 
-
-
-
-
-# 	return output_font
 
 
 def add_features(font, output_font):
@@ -431,9 +302,55 @@ def copy_data_from_glyph(source, destination, exclude=[]):
 	if "contours" not in exclude:
 		destination.contours = []
 		destination.contours = source.contours
+	return destination
+
+
+def process_outline(glyph, outline_width):
+	outlined_glyph_inner = copy_data_from_glyph(glyph.copy(), Glyph())
+	outlined_glyph_outer = copy_data_from_glyph(glyph.copy(), Glyph())
+	outline_glyph(outlined_glyph_inner, -outline_width)
+	outline_glyph(outlined_glyph_outer, outline_width)
+	output_glyph = Glyph()
+	reverse_contour_pen = ReverseContourPen(output_glyph.getPen())
+	outlined_glyph_inner.draw(reverse_contour_pen)
+	outlined_glyph_outer.draw(output_glyph.getPen())
+	return output_glyph
+
+def process_point(glyph, point_size):
+	point_layer = Glyph()
+	x_ray_pen = XRayPen(
+		point_layer,
+		size=point_size,
+		process="points",
+		use_components=True
+	)
+	glyph.draw(x_ray_pen)
+	return point_layer
+
+
+def process_handle(glyph, handle_size):
+	handle_layer = Glyph()
+	x_ray_pen = XRayPen(
+		handle_layer,
+		size=handle_size,
+		process="handles",
+		use_components=True
+	)
+	glyph.draw(x_ray_pen)
+	return handle_layer
+
+def process_line(glyph, line_width):
+	handle_line_layer = Glyph()
+	x_ray_pen = XRayPen(
+		handle_line_layer,
+		size=line_width,
+		process="handle_lines",
+		use_components=True
+	)
+	glyph.draw(x_ray_pen)
+	return handle_line_layer
 
 def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0000"):
-	
 	new_upm = 16_384
 	scale_factor = new_upm / font.info.unitsPerEm
 	drawing_scale_factor = scale_factor * (font.info.unitsPerEm / 1000)
@@ -500,57 +417,24 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 		normalized_glyphs[glyph.name] = normalized_glyph
 
 
-	
+
+
 	for glyph_name in font.keys():
 		for outline_width in [axis_outline.minimum, axis_outline.maximum]:
-			outlined_glyph_inner = normalized_glyphs[glyph_name].copy()
-			outlined_glyph_outer = normalized_glyphs[glyph_name].copy()
-			outline_glyph(outlined_glyph_inner, -outline_width * drawing_scale_factor)
-			outline_glyph(outlined_glyph_outer, outline_width * drawing_scale_factor)
-			output_glyph = Glyph()
-			
-			reverse_contour_pen = ReverseContourPen(output_glyph.getPen())
-			outlined_glyph_inner.draw(reverse_contour_pen)
-			outlined_glyph_outer.draw(output_glyph.getPen())
-
+			output_glyph = process_outline(glyph, outline_width * drawing_scale_factor)
 			outlined_glyphs.setdefault(outline_width, {})[glyph_name] = output_glyph
 
-
 		for point_size in [axis_point.minimum, axis_point.maximum]:
-			glyph = font[glyph_name]
-			point_layer = Glyph()
-			x_ray_pen = XRayPen(
-				point_layer,
-				size=point_size * drawing_scale_factor,
-				process="points",
-				use_components=False
-			)
-			glyph.draw(x_ray_pen)
-			point_glyphs.setdefault(point_size, {})[glyph_name] = point_layer
+			output_glyph = process_point(glyph, point_size * drawing_scale_factor)
+			point_glyphs.setdefault(point_size, {})[glyph_name] = output_glyph
 
 		for handle_size in [axis_handle.minimum, axis_handle.maximum]:
-			glyph = font[glyph_name]
-			handle_layer = Glyph()
-			x_ray_pen = XRayPen(
-				handle_layer,
-				size=handle_size * drawing_scale_factor,
-				process="handles",
-				use_components=False
-			)
-			glyph.draw(x_ray_pen)
-			handle_glyphs.setdefault(handle_size, {})[glyph_name] = handle_layer
+			output_glyph = process_handle(glyph, handle_size * drawing_scale_factor)
+			handle_glyphs.setdefault(handle_size, {})[glyph_name] = output_glyph
 
 		for line_width in [axis_line.minimum, axis_line.maximum]:
-			glyph = font[glyph_name]
-			handle_line_layer = Glyph()
-			x_ray_pen = XRayPen(
-				handle_line_layer,
-				size=line_width * drawing_scale_factor,
-				process="handle_lines",
-				use_components=False
-			)
-			glyph.draw(x_ray_pen)
-			handle_line_glyphs.setdefault(line_width, {})[glyph_name] = handle_line_layer
+			output_glyph = process_line(glyph, line_width * drawing_scale_factor)
+			handle_line_glyphs.setdefault(line_width, {})[glyph_name] = output_glyph
 
 	for point_size in [axis_point.minimum, axis_point.maximum]:
 		for handle_size in [axis_handle.minimum, axis_handle.maximum]:
@@ -575,6 +459,9 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 						master.newGlyph(glyph_name + ".bounds")
 						master.newGlyph(glyph_name + "_bounds")
 						master.newGlyph(glyph_name + ".bounds.filled")
+
+					square(master.newGlyph("point"), (0, 0), point_size * drawing_scale_factor)
+					circle(master.newGlyph("handle"), (0, 0), handle_size * drawing_scale_factor, tension=0.66)
 
 					source = SourceDescriptor()
 					source.font = master
@@ -612,13 +499,13 @@ if __name__ == "__main__":
 	import cProfile
 	import pstats
 	start = datetime.now()
-	# profiler = cProfile.Profile()
-	# profiler.enable()
+	profiler = cProfile.Profile()
+	profiler.enable()
 	main()
-	# profiler.disable()
-	# stats = pstats.Stats(profiler)
-	# stats.sort_stats(pstats.SortKey.TIME)
-	# stats.print_stats(10)
+	profiler.disable()
+	stats = pstats.Stats(profiler)
+	stats.sort_stats(pstats.SortKey.TIME)
+	stats.print_stats(10)
 	print((datetime.now() - start).total_seconds())
 
 
