@@ -22,4 +22,9 @@ setup(
     ],
     keywords='x-ray, ndf, plugin',
     python_requires='>=3.6',
+    entry_points={
+        'console_scripts': [
+            'ndf_x_ray=x_ray.x_ray:main',
+        ],
+    },
 )

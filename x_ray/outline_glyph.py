@@ -1,16 +1,13 @@
 import math
 
-
-import math
-
 def calculate_offset(coordinates, i, offset, num_points, first_point_offset=1):
     p0 = coordinates[i - first_point_offset]
     p1 = coordinates[i]
     p2 = coordinates[(i + 1) % num_points]
 
     # Calculate vectors
-    v1 = (p0[0] - p1[0], p0[1] - p1[1])
-    v2 = (p2[0] - p1[0], p2[1] - p1[1])
+    v1 = (p0.x - p1.x, p0.y - p1.y)
+    v2 = (p2.x - p1.x, p2.y - p1.y)
 
     # Normalize vectors
     v1_length = math.sqrt(v1[0]**2 + v1[1]**2)
@@ -24,9 +21,7 @@ def calculate_offset(coordinates, i, offset, num_points, first_point_offset=1):
     
     if abs(cross_product) < 1e-10:
         # Handle collinear case
-        offset_x = p1[0] - offset * v1_normalized[1]  # Perpendicular offset direction
-        offset_y = p1[1] + offset * v1_normalized[0]  # Perpendicular offset direction
-        return (offset_x, offset_y)
+        return (p1.x - offset * v1_normalized[1], p1.y + offset * v1_normalized[0])
     
     bisector = (v1_normalized[0] + v2_normalized[0], v1_normalized[1] + v2_normalized[1])
     bisector_length = math.sqrt(bisector[0]**2 + bisector[1]**2)
@@ -37,10 +32,7 @@ def calculate_offset(coordinates, i, offset, num_points, first_point_offset=1):
     angle = math.atan2(cross_product, dot_product)
     factor = offset / math.sin(angle / 2)
 
-    # Calculate offset point
-    offset_x = p1[0] + bisector_normalized[0] * factor
-    offset_y = p1[1] + bisector_normalized[1] * factor
-    return (offset_x, offset_y)
+    return (p1.x + bisector_normalized[0] * factor, p1.y + bisector_normalized[1] * factor)
 
 
 def get_simple_offsets(coordinates, offset):
@@ -64,8 +56,7 @@ def get_simple_offsets(coordinates, offset):
 
 def outline_glyph(glyph, offset_distance):
     for contour in glyph:
-        contour_points = [(point.x, point.y) for point in contour]
-        offset = get_simple_offsets(contour_points, offset_distance)
+        offset = get_simple_offsets(contour, offset_distance)
         for p, point in enumerate(contour):
             x, y = offset[p]
             point.x = int(x)

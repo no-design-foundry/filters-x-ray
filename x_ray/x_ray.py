@@ -6,16 +6,23 @@ from ufoLib2.objects.point import Point
 from ufoLib2.objects.contour import Contour
 from ufoLib2.objects.glyph import Glyph
 from ufoLib2.objects.component import Component
-
-
-from .outline_glyph import outline_glyph
+from copy import deepcopy
+import numpy as np
 from fontTools.designspaceLib import (
 	DesignSpaceDocument,
 	SourceDescriptor,
 	AxisDescriptor,
 )
 from ufo2ft import compileVariableTTF
-from .colorize import colorize
+
+try:
+	from .outline_glyph import outline_glyph
+	from .normalizing_pen import NormalizingPen
+	from .colorize import colorize
+except ImportError:
+	from outline_glyph import outline_glyph
+	from normalizing_pen import NormalizingPen
+	from colorize import colorize
 
 
 def circle(layer, center, diameter, tension=1):
@@ -108,8 +115,8 @@ def calculate_offset(p0, p1, p2, offset):
 
 	if abs(cross_product) < 1e-10:
 		# Handle collinear case
-		offset_x = p1[0] - offset * v1_normalized[1]  # Perpendicular offset direction
-		offset_y = p1[1] + offset * v1_normalized[0]  # Perpendicular offset direction
+		offset_x = offset * v1_normalized[1]  # Perpendicular offset direction
+		offset_y = offset * v1_normalized[0]  # Perpendicular offset direction
 		return (offset_x, offset_y)
 
 	bisector = (
@@ -213,11 +220,12 @@ class XRayPen(AbstractPen):
 		points = [self.last_point] + list(points)
 		outer_points = []
 		inner_points = []
-		for p in range(1, len(points) - 1):
+		points_len = len((points))
+		for p in range(1, points_len - 1):
 			prev_point = points[p - 1]
 			point = points[p]
 			next_point = points[p + 1]
-
+			
 			if p == 1:
 				angle = atan2(prev_point[1] - point[1], prev_point[0] - point[0]) + pi / 2
 				offset_inner = cos(angle) * line_width, sin(angle) * line_width
@@ -230,7 +238,7 @@ class XRayPen(AbstractPen):
 			outer_points.append(add_offset(point, offset_outer))
 			inner_points.append(add_offset(point, offset_inner))
 			
-			if p == (len(points) - 2):
+			if p == (points_len - 2):
 				angle = atan2(point[1] - next_point[1], point[0] - next_point[0]) + pi / 2
 				offset_inner = cos(angle) * line_width, sin(angle) * line_width
 				offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
@@ -255,6 +263,36 @@ def duplicate_components(glyph_source, glyph_destination, suffix):
 	for component in glyph_source.components:
 		glyph_destination.components.append(Component(component.baseGlyph + suffix, component.transformation))
 
+def glyph_to_json(glyph):
+	contours = []
+	for contour in glyph.contours:
+		points = []
+		for point in contour.points:
+			points.append({
+				"x": point.x,
+				"y": point.y,
+				"type": point.type,
+			})
+		contours.append(points)
+	
+	anchors = []
+	for anchor in glyph.anchors:
+		anchors.append({
+			"x": anchor.x,
+			"y": anchor.y,
+			"name": anchor.name,
+		})
+	
+	json = {
+		"unicodes": glyph.unicodes,
+		"width": glyph.width,
+		"name": glyph.name,
+		"contours": contours,
+		"anchors": anchors,
+	}
+	return json
+	
+
 def x_ray_master(font, output_font, outline_width, line_width, point_size, handle_size):
 	output_font.info.unitsPerEm = font.info.unitsPerEm
 
@@ -273,6 +311,9 @@ def x_ray_master(font, output_font, outline_width, line_width, point_size, handl
 		if glyph_name in ["handle", "point"]:
 			continue
 		glyph = font[glyph_name]
+		
+		# json_glyph = glyph_to_json(glyph)
+
 		ss_glyphs.append(glyph_name)
 
 		bounds_glyph = output_font.newGlyph(glyph_name + "_bounds")
@@ -301,11 +342,18 @@ def x_ray_master(font, output_font, outline_width, line_width, point_size, handl
 
 		output_glyph = output_font.newGlyph(glyph_name)
 		
-		glyph.draw(outlined_glyph.getPen())
+
+		# glyph.draw(outlined_glyph.getPen())
+		normalized_glyph = Glyph()
+		normalizing_pen = NormalizingPen(normalized_glyph.getPen())
+		glyph.draw(normalizing_pen)
+		normalized_glyph.draw(outlined_glyph.getPen())
 		outline_glyph(outlined_glyph, outline_width/2)
 
+
+
 		inner_shape = Glyph()
-		glyph.draw(inner_shape.getPen())
+		outlined_glyph.draw(inner_shape.getPen())
 		outline_glyph(inner_shape, -outline_width/2)
 		reverse_contour_pen = ReverseContourPen(outlined_glyph.getPen())
 		inner_shape.draw(reverse_contour_pen)
@@ -356,17 +404,20 @@ def x_ray_master(font, output_font, outline_width, line_width, point_size, handl
 
 	output_font.features.text = f"""
 	feature ss01 {{
-		{"\n".join([f"sub {glyph_name} by {glyph_name}.bounds;" for glyph_name in ss_glyphs])}
+		featureNames {{
+			name "Glyph's Bounding Box";
+		}};
+		{" ".join([f"sub {glyph_name} by {glyph_name}.bounds;" for glyph_name in ss_glyphs])}
 	}} ss01;
 
 	feature ss02 {{
-		{"\n".join([f"sub {glyph_name} by {glyph_name}.filled;" for glyph_name in ss_glyphs])}
-		{"\n".join([f"sub {glyph_name}.bounds by {glyph_name}.bounds.filled;" for glyph_name in ss_glyphs])}
+		featureNames {{
+			name "Filled Glyph";
+		}};
+		{" ".join([f"sub {glyph_name} by {glyph_name}.filled;" for glyph_name in ss_glyphs])}
+		{" ".join([f"sub {glyph_name}.bounds by {glyph_name}.bounds.filled;" for glyph_name in ss_glyphs])}
 	}} ss02;
-
 	"""
-	# 256
-	# 257
 
 	return output_font
 
@@ -394,6 +445,7 @@ def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000
 	axis_outline.default = axis_outline.minimum
 	axis_outline.name = "outline_width"
 	axis_outline.tag = "OTLN"
+	axis_outline.labelNames = dict(en="Outline width")
 	doc.addAxis(axis_outline)
 
 	axis_line = AxisDescriptor()
@@ -402,6 +454,7 @@ def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000
 	axis_line.default = axis_line.minimum
 	axis_line.name = "line_width"
 	axis_line.tag = "LINE"
+	axis_line.labelNames = dict(en="Line width")
 	doc.addAxis(axis_line)
 
 	axis_point = AxisDescriptor()
@@ -410,6 +463,7 @@ def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000
 	axis_point.default = axis_point.minimum
 	axis_point.name = "point_size"
 	axis_point.tag = "POIN"
+	axis_point.labelNames = dict(en="Point size")
 	doc.addAxis(axis_point)
 
 	axis_handle = AxisDescriptor()
@@ -418,10 +472,11 @@ def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000
 	axis_handle.default = axis_handle.minimum
 	axis_handle.name = "handle_size"
 	axis_handle.tag = "HAND"
+	axis_handle.labelNames = dict(en="Handle size")
 	doc.addAxis(axis_handle)
 
 
-
+	
 	# line width, point size, handle size
 	for point_size in [axis_point.minimum, axis_point.maximum]:
 		for handle_size in [axis_handle.minimum, axis_handle.maximum]:
@@ -444,6 +499,42 @@ def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000
 					)
 					doc.addSource(source)
 
+	# for s, source in enumerate(doc.sources):
+	# 	source.font.save(f"/Users/js/Desktop/exports 2/ufo/debug/{s}.ufo")
 	compiled = compileVariableTTF(doc, optimizeGvar=False)
 	colorize(compiled, font.keys(), outline_color=outline_color, line_color=line_color, point_color=point_color)
 	return compiled
+
+def main():
+	from pathlib import Path
+	import argparse
+
+	parser = argparse.ArgumentParser(description="X-ray fonts")
+	parser.add_argument("ufo", type=Font.open, help="Path to the input font file.")
+	parser.add_argument("--glyph_names", nargs="+", help="List of glyph names to process.")
+	args = parser.parse_args()
+	
+	ufo = args.ufo
+	ufo_path = Path(ufo.path)
+	
+	x_rayed_ufo = x_ray(ufo)
+	output_file_name = f"{ufo_path.stem}_x_rayed.ttf"
+	x_rayed_ufo.save(ufo_path.parent/output_file_name)
+
+if __name__ == "__main__":
+	import cProfile
+	import pstats
+	profiler = cProfile.Profile()
+	profiler.enable()
+	main()
+	profiler.disable()
+	stats = pstats.Stats(profiler)
+	stats.sort_stats(pstats.SortKey.TIME)
+	stats.print_stats(10)
+
+
+# normalized_glyph = Glyph()
+# normalizing_pen = NormalizingPen(normalized_glyph.getPen())
+# glyph.draw(normalizing_pen)
+# glyph.clearContours()
+# normalized_glyph.draw(glyph.getPen())
