@@ -60,8 +60,9 @@ def square(layer, center, size):
 def scale_glyph(glyph, scale_factor):
 	for contour in glyph:
 		for point in contour:
-			point.x = round(point.x * scale_factor)
-			point.y = round(point.y * scale_factor)
+			x, y = np.round(np.array((point.x, point.y)) * scale_factor).astype(np.int32)
+			point.x = int(x)
+			point.y = int(y)
 	for component in glyph.components:
 		*scales, x, y = component.transformation
 		component.transformation = tuple(scales + [round(x * scale_factor), round(y * scale_factor)])
@@ -420,6 +421,7 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 
 
 	for glyph_name in font.keys():
+		glyph = font[glyph_name]
 		for outline_width in [axis_outline.minimum, axis_outline.maximum]:
 			output_glyph = process_outline(glyph, outline_width * drawing_scale_factor)
 			outlined_glyphs.setdefault(outline_width, {})[glyph_name] = output_glyph
