@@ -23,7 +23,7 @@ except ImportError:
 	from outline_glyph import outline_glyph
 	from normalizing_pen import NormalizingPen
 	from colorize import colorize
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def circle(layer, center, diameter, tension=1):
 	x, y = center
@@ -60,8 +60,9 @@ def square(layer, center, size):
 def scale_glyph(glyph, scale_factor):
 	for contour in glyph:
 		for point in contour:
-			point.x = round(point.x * scale_factor)
-			point.y = round(point.y * scale_factor)
+			x, y = np.round(np.array((point.x, point.y)) * scale_factor).astype(np.int32)
+			point.x = int(x)
+			point.y = int(y)
 	for component in glyph.components:
 		*scales, x, y = component.transformation
 		component.transformation = tuple(scales + [round(x * scale_factor), round(y * scale_factor)])
@@ -155,41 +156,40 @@ def add_offset(point, offset):
 class XRayPen(AbstractPen):
 	def __init__(
 		self,
-		handle_line_layer,
-		handle_layer,
-		line_width,
-		point_size,
-		handle_size,
+		layer,
+		size,
+		process,
 		use_components=True,
-		handle_component_name=None,
-		point_component_name=None,
 	):
-		self.handle_line_layer = handle_line_layer
-		self.handle_layer = handle_layer
-		self.line_width = line_width
-		self.point_size = point_size
-		self.handle_size = handle_size
+		self.layer = layer
+		self.size = size
+		self.process = process
 		self.use_components = use_components
-		self.handle_component_name = handle_component_name
-		self.point_component_name = point_component_name
+		self.handle_component_name = "handle"
+		self.point_component_name = "point"
 		self.last_point = None
-		pass
 
 	def handle(self, point):
-		if self.use_components:
-			self.handle_layer.components.append(
-				Component(self.handle_component_name, (1, 0, 0, 1, point[0], point[1]))
-			)
-		else:
-			circle(self.handle_layer, point, self.handle_size, tension=0.66)
+		if self.process == "handles":
+			if self.use_components:
+				self.layer.components.append(
+					Component(self.handle_component_name, (1, 0, 0, 1, point[0], point[1]))
+				)
+			else:
+				circle(self.layer, point, self.size, tension=0.66)
+
+	def handle_line(self, point_a, point_b):
+		if self.process == "handle_lines":
+			line_shape(self.layer, point_a, point_b, self.size)
 
 	def point(self, point):
-		if self.use_components:
-			self.handle_layer.components.append(
-				Component(self.point_component_name, (1, 0, 0, 1, point[0], point[1]))
-			)
-		else:
-			square(self.handle_layer, point, self.point_size)
+		if self.process == "points":
+			if self.use_components:
+				self.layer.components.append(
+					Component(self.point_component_name, (1, 0, 0, 1, point[0], point[1]))
+				)
+			else:
+				square(self.layer, point, self.size)
 
 	def moveTo(self, point):
 		self.point(point)
@@ -200,9 +200,8 @@ class XRayPen(AbstractPen):
 		self.last_point = point
 
 	def curveTo(self, point_1, point_2, point_3):
-		line_shape(self.handle_line_layer, self.last_point, point_1, self.line_width)
-		line_shape(self.handle_line_layer, point_2, point_3, self.line_width)
-
+		self.handle_line(self.last_point, point_1)
+		self.handle_line(point_2, point_3)
 		self.handle(point_1)
 		self.handle(point_2)
 		self.point(point_3)
@@ -210,47 +209,48 @@ class XRayPen(AbstractPen):
 		self.last_point = point_3
 
 	def qCurveTo(self, *points):
+		last_point = points[-1]
 
 		for point in points[:-1]:
 			self.handle(point)
-
-		last_point = points[-1]
-		line_width = self.line_width / 2
-
-		points = [self.last_point] + list(points)
-		outer_points = []
-		inner_points = []
-		points_len = len((points))
-		for p in range(1, points_len - 1):
-			prev_point = points[p - 1]
-			point = points[p]
-			next_point = points[p + 1]
-			
-			if p == 1:
-				angle = atan2(prev_point[1] - point[1], prev_point[0] - point[0]) + pi / 2
-				offset_inner = cos(angle) * line_width, sin(angle) * line_width
-				offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
-				inner_points.append(add_offset(prev_point, offset_inner))
-				outer_points.append(add_offset(prev_point, offset_outer))
-
-			offset_inner = calculate_offset(prev_point, point, next_point, line_width)
-			offset_outer = calculate_offset(prev_point, point, next_point, -line_width)
-			outer_points.append(add_offset(point, offset_outer))
-			inner_points.append(add_offset(point, offset_inner))
-			
-			if p == (points_len - 2):
-				angle = atan2(point[1] - next_point[1], point[0] - next_point[0]) + pi / 2
-				offset_inner = cos(angle) * line_width, sin(angle) * line_width
-				offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
-				inner_points.append(add_offset(next_point, offset_inner))
-				outer_points.append(add_offset(next_point, offset_outer))
 		
-		points = inner_points + outer_points[::-1]
-		contour = Contour()
-		for x, y in points:
-			contour.points.append(Point(x, y, "line"))
-		# print(contour)
-		self.handle_line_layer.contours.append(contour)
+		if self.process == "handle_lines":
+			line_width = self.size / 2
+
+			points = [self.last_point] + list(points)
+			outer_points = []
+			inner_points = []
+			points_len = len((points))
+			for p in range(1, points_len - 1):
+				prev_point = points[p - 1]
+				point = points[p]
+				next_point = points[p + 1]
+				
+				if p == 1:
+					angle = atan2(prev_point[1] - point[1], prev_point[0] - point[0]) + pi / 2
+					offset_inner = cos(angle) * line_width, sin(angle) * line_width
+					offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
+					inner_points.append(add_offset(prev_point, offset_inner))
+					outer_points.append(add_offset(prev_point, offset_outer))
+
+				offset_inner = calculate_offset(prev_point, point, next_point, line_width)
+				offset_outer = calculate_offset(prev_point, point, next_point, -line_width)
+				outer_points.append(add_offset(point, offset_outer))
+				inner_points.append(add_offset(point, offset_inner))
+				
+				if p == (points_len - 2):
+					angle = atan2(point[1] - next_point[1], point[0] - next_point[0]) + pi / 2
+					offset_inner = cos(angle) * line_width, sin(angle) * line_width
+					offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
+					inner_points.append(add_offset(next_point, offset_inner))
+					outer_points.append(add_offset(next_point, offset_outer))
+			
+			points = inner_points + outer_points[::-1]
+			contour = Contour()
+			for x, y in points:
+				contour.points.append(Point(x, y, "line"))
+			# print(contour)
+			self.layer.contours.append(contour)
 		self.last_point = last_point
 		self.point(last_point)
 
@@ -263,141 +263,19 @@ def duplicate_components(glyph_source, glyph_destination, suffix):
 	for component in glyph_source.components:
 		glyph_destination.components.append(Component(component.baseGlyph + suffix, component.transformation))
 
-def glyph_to_json(glyph):
-	contours = []
-	for contour in glyph.contours:
-		points = []
-		for point in contour.points:
-			points.append({
-				"x": point.x,
-				"y": point.y,
-				"type": point.type,
-			})
-		contours.append(points)
-	
-	anchors = []
-	for anchor in glyph.anchors:
-		anchors.append({
-			"x": anchor.x,
-			"y": anchor.y,
-			"name": anchor.name,
-		})
-	
-	json = {
-		"unicodes": glyph.unicodes,
-		"width": glyph.width,
-		"name": glyph.name,
-		"contours": contours,
-		"anchors": anchors,
-	}
-	return json
-	
-
-def x_ray_master(font, output_font, outline_width, line_width, point_size, handle_size):
-	output_font.info.unitsPerEm = font.info.unitsPerEm
-
-	handle = output_font.newGlyph("handle")
-	circle(handle, (0, 0), handle_size, tension=0.55)
-
-	point = output_font.newGlyph("point")
-	square(point, (0, 0), point_size)
-
-	descender = font.info.descender
-	ascender = max(font.info.ascender, font.info.capHeight)
-
-	ss_glyphs = []
-	
-	for glyph_name in font.keys():
-		if glyph_name in ["handle", "point"]:
-			continue
-		glyph = font[glyph_name]
-		
-		# json_glyph = glyph_to_json(glyph)
-
-		ss_glyphs.append(glyph_name)
-
-		bounds_glyph = output_font.newGlyph(glyph_name + "_bounds")
-		bounds_glyph.width = glyph.width
-
-		contour = Contour()
-		contour.points = [
-			Point(0, descender, "line"),
-			Point(glyph.width, descender, "line"),
-			Point(glyph.width, ascender, "line"),
-			Point(0, ascender, "line")
-			]
-		bounds_glyph.contours.append(contour)
-
-		output_glyph_handles = output_font.newGlyph(glyph_name + "_handles")
-		output_glyph_handles.width = glyph.width
-		duplicate_components(glyph, output_glyph_handles, "_handles")
-
-		output_glyph_handle_lines = output_font.newGlyph(glyph_name + "_lines")
-		output_glyph_handle_lines.width = glyph.width
-		duplicate_components(glyph, output_glyph_handle_lines, "_lines")
-
-		outlined_glyph = output_font.newGlyph(glyph_name + "_outlined")
-		outlined_glyph.width = glyph.width
-		duplicate_components(glyph, outlined_glyph, "_outlined")
-
-		output_glyph = output_font.newGlyph(glyph_name)
-		
-
-		# glyph.draw(outlined_glyph.getPen())
-		normalized_glyph = Glyph()
-		normalizing_pen = NormalizingPen(normalized_glyph.getPen())
-		glyph.draw(normalizing_pen)
-		normalized_glyph.draw(outlined_glyph.getPen())
-		outline_glyph(outlined_glyph, outline_width/2)
 
 
-
-		inner_shape = Glyph()
-		outlined_glyph.draw(inner_shape.getPen())
-		outline_glyph(inner_shape, -outline_width/2)
-		reverse_contour_pen = ReverseContourPen(outlined_glyph.getPen())
-		inner_shape.draw(reverse_contour_pen)
-
-		filled_glyph = output_font.newGlyph(glyph_name + ".filled")
-		filled_glyph.width = glyph.width
-		duplicate_components(glyph, filled_glyph, ".filled")
-
-		filled_glyph.contours.extend(glyph.contours[::1])
-		# glyph.draw(filled_glyph.getPen())
-
-		output_font.newGlyph(glyph_name + ".bounds").width = glyph.width
-		output_font.newGlyph(glyph_name + ".bounds.filled").width = glyph.width
-
-		output_glyph.width = glyph.width
-		output_glyph.unicodes = glyph.unicodes
-
-		handle_line_layer = output_glyph_handle_lines
-		handle_layer = output_glyph_handles
-
-		x_ray_pen = XRayPen(
-			handle_line_layer,
-			handle_layer,
-			line_width=line_width,
-			point_size=point_size,
-			handle_size=handle_size,
-			use_components=False,
-			handle_component_name="handle",
-			point_component_name="point",
-		)
-		glyph.draw(x_ray_pen)
-
-		output_glyph.contours.extend(handle_line_layer.contours + handle_layer.contours + outlined_glyph.contours) 
-
-
+def add_features(font, output_font):
+	glyph_names = list(font.keys())
 	for pair in font.kerning:
 		output_font.kerning[pair] = font.kerning[pair]
 		for gn_index, glyph_name in enumerate(pair):
-			if glyph_name in ss_glyphs:
+			if glyph_name in glyph_names:
 				for suffix in [".bounds", ".filled", ".bounds.filled"]:
 					new_pair = list(pair)
 					new_pair[gn_index] = glyph_name + suffix
 					output_font.kerning[tuple(new_pair)] = font.kerning[pair]
-		if pair[0] in ss_glyphs and pair[1] in ss_glyphs:
+		if pair[0] in glyph_names and pair[1] in glyph_names:
 			for suffix in [".bounds", ".filled", ".bounds.filled"]:
 				new_pair = [pair[0] + suffix, pair[1] + suffix]
 				output_font.kerning[tuple(new_pair)] = font.kerning[pair]
@@ -407,23 +285,74 @@ def x_ray_master(font, output_font, outline_width, line_width, point_size, handl
 		featureNames {{
 			name "Glyph's Bounding Box";
 		}};
-		{" ".join([f"sub {glyph_name} by {glyph_name}.bounds;" for glyph_name in ss_glyphs])}
+		{" ".join([f"sub {glyph_name} by {glyph_name}.bounds;" for glyph_name in glyph_names])}
 	}} ss01;
 
 	feature ss02 {{
 		featureNames {{
 			name "Filled Glyph";
 		}};
-		{" ".join([f"sub {glyph_name} by {glyph_name}.filled;" for glyph_name in ss_glyphs])}
-		{" ".join([f"sub {glyph_name}.bounds by {glyph_name}.bounds.filled;" for glyph_name in ss_glyphs])}
+		{" ".join([f"sub {glyph_name} by {glyph_name}.filled;" for glyph_name in glyph_names])}
+		{" ".join([f"sub {glyph_name}.bounds by {glyph_name}.bounds.filled;" for glyph_name in glyph_names])}
 	}} ss02;
 	"""
 
-	return output_font
+def copy_data_from_glyph(source, destination, exclude=[]):
+	destination.copyDataFromGlyph(source)
+	if "unicodes" in exclude:
+		destination.unicodes = []
+	if "contours" not in exclude:
+		destination.contours = []
+		destination.contours = source.contours
+	return destination
 
 
-def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000000"):
-	
+def process_outline(glyph, outline_width):
+	outlined_glyph_inner = copy_data_from_glyph(glyph.copy(), Glyph())
+	outlined_glyph_outer = copy_data_from_glyph(glyph.copy(), Glyph())
+	outline_glyph(outlined_glyph_inner, -outline_width)
+	outline_glyph(outlined_glyph_outer, outline_width)
+	output_glyph = Glyph()
+	reverse_contour_pen = ReverseContourPen(output_glyph.getPen())
+	outlined_glyph_inner.draw(reverse_contour_pen)
+	outlined_glyph_outer.draw(output_glyph.getPen())
+	return output_glyph
+
+def process_point(glyph, point_size):
+	point_layer = Glyph()
+	x_ray_pen = XRayPen(
+		point_layer,
+		size=point_size,
+		process="points",
+		use_components=True
+	)
+	glyph.draw(x_ray_pen)
+	return point_layer
+
+
+def process_handle(glyph, handle_size):
+	handle_layer = Glyph()
+	x_ray_pen = XRayPen(
+		handle_layer,
+		size=handle_size,
+		process="handles",
+		use_components=True
+	)
+	glyph.draw(x_ray_pen)
+	return handle_layer
+
+def process_line(glyph, line_width):
+	handle_line_layer = Glyph()
+	x_ray_pen = XRayPen(
+		handle_line_layer,
+		size=line_width,
+		process="handle_lines",
+		use_components=True
+	)
+	glyph.draw(x_ray_pen)
+	return handle_line_layer
+
+def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0000"):
 	new_upm = 16_384
 	scale_factor = new_upm / font.info.unitsPerEm
 	drawing_scale_factor = scale_factor * (font.info.unitsPerEm / 1000)
@@ -476,21 +405,72 @@ def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000
 	doc.addAxis(axis_handle)
 
 
-	
-	# line width, point size, handle size
+	normalized_glyphs = {}
+	outlined_glyphs = {}
+	point_glyphs = {}
+	handle_glyphs = {}
+	handle_line_glyphs = {}
+
+
+	for glyph in font:
+		normalized_glyph = Glyph()
+		normalizing_pen = NormalizingPen(normalized_glyph.getPen(), zero_handles_distance_fix=10*drawing_scale_factor)
+		glyph.draw(normalizing_pen)
+		normalized_glyphs[glyph.name] = normalized_glyph
+
+	for glyph_name in font.keys():
+		glyph = font[glyph_name]
+		normalized_glyph = normalized_glyphs[glyph_name]
+		for outline_width in [axis_outline.minimum, axis_outline.maximum]:
+			output_glyph = process_outline(normalized_glyph, outline_width * drawing_scale_factor)
+			outlined_glyphs.setdefault(outline_width, {})[glyph_name] = output_glyph
+
+		for point_size in [axis_point.minimum, axis_point.maximum]:
+			output_glyph = process_point(glyph, point_size * drawing_scale_factor)
+			point_glyphs.setdefault(point_size, {})[glyph_name] = output_glyph
+
+		for handle_size in [axis_handle.minimum, axis_handle.maximum]:
+			output_glyph = process_handle(glyph, handle_size * drawing_scale_factor)
+			handle_glyphs.setdefault(handle_size, {})[glyph_name] = output_glyph
+
+		for line_width in [axis_line.minimum, axis_line.maximum]:
+			output_glyph = process_line(glyph, line_width * drawing_scale_factor)
+			handle_line_glyphs.setdefault(line_width, {})[glyph_name] = output_glyph
+
 	for point_size in [axis_point.minimum, axis_point.maximum]:
 		for handle_size in [axis_handle.minimum, axis_handle.maximum]:
 			for outline_width in [axis_outline.minimum, axis_outline.maximum]:
 				for line_width in [axis_line.minimum, axis_line.maximum]:
+					master = Font()
+					master.info.unitsPerEm = new_upm
+					master.info.ascender = font.info.ascender
+					master.info.descender = font.info.descender
+					master.info.capHeight = font.info.capHeight
+					master.info.xHeight = font.info.xHeight
+
+					add_features(font, master)
+
+					for glyph_name in font.keys():
+						copy_data_from_glyph(outlined_glyphs[outline_width][glyph_name], master.newGlyph(glyph_name + "_outlined"), exclude=["unicodes"])
+						copy_data_from_glyph(point_glyphs[point_size][glyph_name], master.newGlyph(glyph_name + "_points"), exclude=["unicodes"])
+						copy_data_from_glyph(handle_glyphs[handle_size][glyph_name], master.newGlyph(glyph_name + "_handles"), exclude=["unicodes"])
+						copy_data_from_glyph(handle_line_glyphs[line_width][glyph_name], master.newGlyph(glyph_name + "_lines"), exclude=["unicodes"])
+						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name), exclude=["contours"])
+						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name + ".filled"), exclude=["unicodes"])
+						master.newGlyph(glyph_name + ".bounds")
+						bounds_pen = master.newGlyph(glyph_name + "_bounds").getPen()
+						bounds_pen.moveTo((0, font.info.descender))
+						bounds_pen.lineTo((0, font.info.ascender))
+						bounds_pen.lineTo((glyph.width, font.info.ascender))
+						bounds_pen.lineTo((glyph.width, font.info.descender))
+						bounds_pen.closePath()
+						master.newGlyph(glyph_name + ".bounds.filled")
+
+					square(master.newGlyph("point"), (0, 0), point_size * drawing_scale_factor)
+					circle(master.newGlyph("handle"), (0, 0), handle_size * drawing_scale_factor, tension=0.66)
+
 					source = SourceDescriptor()
-					source.font = x_ray_master(
-						font,
-						Font(),
-						outline_width * drawing_scale_factor,
-						line_width * drawing_scale_factor,
-						point_size * drawing_scale_factor,
-						handle_size * drawing_scale_factor
-					)
+					source.font = master
 					source.location = dict(
 						outline_width=outline_width,
 						line_width=line_width,
@@ -499,11 +479,10 @@ def x_ray(font, outline_color="#000000", line_color="#000000", point_color="#000
 					)
 					doc.addSource(source)
 
-	# for s, source in enumerate(doc.sources):
-	# 	source.font.save(f"/Users/js/Desktop/exports 2/ufo/debug/{s}.ufo")
 	compiled = compileVariableTTF(doc, optimizeGvar=False)
 	colorize(compiled, font.keys(), outline_color=outline_color, line_color=line_color, point_color=point_color)
 	return compiled
+
 
 def main():
 	from pathlib import Path
