@@ -1,6 +1,7 @@
 import numpy as np
 from fontTools.misc.bezierTools import splitCubicAtT, lineLineIntersections
 import numpy as np
+from math import sqrt
 
 def bezier_extrema(P0, P1, P2, P3):
 	P0x, P0y = P0
@@ -26,42 +27,69 @@ def bezier_extrema(P0, P1, P2, P3):
 	
 	return times
 
-class NormalizingPen:
-    def __init__(self, other_pen):
-        self.last_point = None
-        self.other_pen = other_pen
-        
-    def moveTo(self, point):
-        self.last_point = point
-        self.other_pen.moveTo(point)
-    
-    def lineTo(self, point):
-        self.last_point = point
-        self.other_pen.lineTo(point)
-        
-    def curveTo(self, *points):
-        extrema = bezier_extrema(self.last_point, *points)
-        handle_intersections = lineLineIntersections(self.last_point, points[0], *points[1:])
-        if extrema:
-            splits = splitCubicAtT(self.last_point, *points, *extrema)
-            for split in splits:
-                rounded_points = list(map(lambda point:(round(point[0]),round(point[1])), split[1:]))                
-                self.other_pen.curveTo(*rounded_points)
-        elif any([-.1 <= intersection.t1 <= 1.1 and -.1 <= intersection.t2 <= 1.1 for intersection in handle_intersections]):
-            splits = splitCubicAtT(self.last_point, *points, .5)
-            for split in splits:
-                rounded_points = list(map(lambda point:(round(point[0]),round(point[1])), split[1:]))                
-                self.other_pen.curveTo(*rounded_points)
-        elif points[0] == self.last_point or points[1] == points[-1]:
-            pass
-        else:
-            self.other_pen.curveTo(*points)
-        self.last_point = points[-1]
+def distance_between_points(p1, p2):
+	return sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
-    def qCurveTo(self, *points):
-        self.other_pen.qCurveTo(*points)
-        self.last_point = points[-1]
-        
-    def closePath(self):
-        self.other_pen.closePath()
+def extend_handle(point, target_point, distance=10):
+	"""Extend a zero-length handle in the direction of the tangent."""
+	vector_x = target_point[0] - point[0]
+	vector_y = target_point[1] - point[1]
+	length = sqrt(vector_x ** 2 + vector_y ** 2)
+	
+	# Normalize vector
+	if length == 0:
+		return point  # Skip if the points are the same
+	
+	vector_x /= length
+	vector_y /= length
+	
+	# Extend handle in the direction of the vector (tangent)
+	return [point[0] + vector_x * distance, point[1] + vector_y * distance]
+
+class NormalizingPen:
+	def __init__(self, other_pen, zero_handles_distance_fix=10):
+		self.last_point = None
+		self.other_pen = other_pen
+		self.zero_handles_distance_fix = zero_handles_distance_fix
+		
+	def moveTo(self, point):
+		self.last_point = point
+		self.other_pen.moveTo(point)
+	
+	def lineTo(self, point):
+		self.last_point = point
+		self.other_pen.lineTo(point)
+		
+	def curveTo(self, *points):
+		points = list(points)
+		extrema = bezier_extrema(self.last_point, *points)
+		handle_intersections = lineLineIntersections(self.last_point, points[0], *points[1:])
+		
+		if self.last_point == points[0]:
+			points[0] = extend_handle(self.last_point, points[1], self.zero_handles_distance_fix)
+
+		if points[1] == points[2]:
+			points[1] = extend_handle(points[2], points[0], self.zero_handles_distance_fix)
+
+		if extrema:
+			splits = splitCubicAtT(self.last_point, *points, *extrema)
+			for split in splits:
+				rounded_points = list(map(lambda point:(round(point[0]),round(point[1])), split[1:]))                
+				self.other_pen.curveTo(*rounded_points)
+		elif any([-.1 <= intersection.t1 <= 1.1 and -.1 <= intersection.t2 <= 1.1 for intersection in handle_intersections]):
+			splits = splitCubicAtT(self.last_point, *points, .5)
+			for split in splits:
+				rounded_points = list(map(lambda point:(round(point[0]),round(point[1])), split[1:]))                
+				self.other_pen.curveTo(*rounded_points)
+		else:
+			self.other_pen.curveTo(*points)
+
+		self.last_point = points[-1]
+
+	def qCurveTo(self, *points):
+		self.other_pen.qCurveTo(*points)
+		self.last_point = points[-1]
+		
+	def closePath(self):
+		self.other_pen.closePath()
    

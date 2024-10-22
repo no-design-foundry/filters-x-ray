@@ -209,47 +209,48 @@ class XRayPen(AbstractPen):
 		self.last_point = point_3
 
 	def qCurveTo(self, *points):
+		last_point = points[-1]
 
 		for point in points[:-1]:
 			self.handle(point)
-
-		last_point = points[-1]
-		line_width = self.size / 2
-
-		points = [self.last_point] + list(points)
-		outer_points = []
-		inner_points = []
-		points_len = len((points))
-		for p in range(1, points_len - 1):
-			prev_point = points[p - 1]
-			point = points[p]
-			next_point = points[p + 1]
-			
-			if p == 1:
-				angle = atan2(prev_point[1] - point[1], prev_point[0] - point[0]) + pi / 2
-				offset_inner = cos(angle) * line_width, sin(angle) * line_width
-				offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
-				inner_points.append(add_offset(prev_point, offset_inner))
-				outer_points.append(add_offset(prev_point, offset_outer))
-
-			offset_inner = calculate_offset(prev_point, point, next_point, line_width)
-			offset_outer = calculate_offset(prev_point, point, next_point, -line_width)
-			outer_points.append(add_offset(point, offset_outer))
-			inner_points.append(add_offset(point, offset_inner))
-			
-			if p == (points_len - 2):
-				angle = atan2(point[1] - next_point[1], point[0] - next_point[0]) + pi / 2
-				offset_inner = cos(angle) * line_width, sin(angle) * line_width
-				offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
-				inner_points.append(add_offset(next_point, offset_inner))
-				outer_points.append(add_offset(next_point, offset_outer))
 		
-		points = inner_points + outer_points[::-1]
-		contour = Contour()
-		for x, y in points:
-			contour.points.append(Point(x, y, "line"))
-		# print(contour)
-		self.handle_line_layer.contours.append(contour)
+		if self.process == "handle_lines":
+			line_width = self.size / 2
+
+			points = [self.last_point] + list(points)
+			outer_points = []
+			inner_points = []
+			points_len = len((points))
+			for p in range(1, points_len - 1):
+				prev_point = points[p - 1]
+				point = points[p]
+				next_point = points[p + 1]
+				
+				if p == 1:
+					angle = atan2(prev_point[1] - point[1], prev_point[0] - point[0]) + pi / 2
+					offset_inner = cos(angle) * line_width, sin(angle) * line_width
+					offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
+					inner_points.append(add_offset(prev_point, offset_inner))
+					outer_points.append(add_offset(prev_point, offset_outer))
+
+				offset_inner = calculate_offset(prev_point, point, next_point, line_width)
+				offset_outer = calculate_offset(prev_point, point, next_point, -line_width)
+				outer_points.append(add_offset(point, offset_outer))
+				inner_points.append(add_offset(point, offset_inner))
+				
+				if p == (points_len - 2):
+					angle = atan2(point[1] - next_point[1], point[0] - next_point[0]) + pi / 2
+					offset_inner = cos(angle) * line_width, sin(angle) * line_width
+					offset_outer = cos(angle) * -line_width, sin(angle) * -line_width
+					inner_points.append(add_offset(next_point, offset_inner))
+					outer_points.append(add_offset(next_point, offset_outer))
+			
+			points = inner_points + outer_points[::-1]
+			contour = Contour()
+			for x, y in points:
+				contour.points.append(Point(x, y, "line"))
+			# print(contour)
+			self.layer.contours.append(contour)
 		self.last_point = last_point
 		self.point(last_point)
 
@@ -413,17 +414,15 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 
 	for glyph in font:
 		normalized_glyph = Glyph()
-		normalizing_pen = NormalizingPen(normalized_glyph.getPen())
+		normalizing_pen = NormalizingPen(normalized_glyph.getPen(), zero_handles_distance_fix=10*drawing_scale_factor)
 		glyph.draw(normalizing_pen)
 		normalized_glyphs[glyph.name] = normalized_glyph
 
-
-
-
 	for glyph_name in font.keys():
 		glyph = font[glyph_name]
+		normalized_glyph = normalized_glyphs[glyph_name]
 		for outline_width in [axis_outline.minimum, axis_outline.maximum]:
-			output_glyph = process_outline(glyph, outline_width * drawing_scale_factor)
+			output_glyph = process_outline(normalized_glyph, outline_width * drawing_scale_factor)
 			outlined_glyphs.setdefault(outline_width, {})[glyph_name] = output_glyph
 
 		for point_size in [axis_point.minimum, axis_point.maximum]:
@@ -459,7 +458,12 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name), exclude=["contours"])
 						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name + ".filled"), exclude=["unicodes"])
 						master.newGlyph(glyph_name + ".bounds")
-						master.newGlyph(glyph_name + "_bounds")
+						bounds_pen = master.newGlyph(glyph_name + "_bounds").getPen()
+						bounds_pen.moveTo((0, font.info.descender))
+						bounds_pen.lineTo((0, font.info.ascender))
+						bounds_pen.lineTo((glyph.width, font.info.ascender))
+						bounds_pen.lineTo((glyph.width, font.info.descender))
+						bounds_pen.closePath()
 						master.newGlyph(glyph_name + ".bounds.filled")
 
 					square(master.newGlyph("point"), (0, 0), point_size * drawing_scale_factor)
@@ -501,13 +505,13 @@ if __name__ == "__main__":
 	import cProfile
 	import pstats
 	start = datetime.now()
-	profiler = cProfile.Profile()
-	profiler.enable()
+	# profiler = cProfile.Profile()
+	# profiler.enable()
 	main()
-	profiler.disable()
-	stats = pstats.Stats(profiler)
-	stats.sort_stats(pstats.SortKey.TIME)
-	stats.print_stats(10)
+	# profiler.disable()
+	# stats = pstats.Stats(profiler)
+	# stats.sort_stats(pstats.SortKey.TIME)
+	# stats.print_stats(10)
 	print((datetime.now() - start).total_seconds())
 
 
