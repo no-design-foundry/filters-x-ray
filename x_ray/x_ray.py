@@ -310,8 +310,8 @@ def copy_data_from_glyph(source, destination, exclude=[]):
 def process_outline(glyph, outline_width):
 	outlined_glyph_inner = copy_data_from_glyph(glyph.copy(), Glyph())
 	outlined_glyph_outer = copy_data_from_glyph(glyph.copy(), Glyph())
-	outline_glyph(outlined_glyph_inner, -outline_width)
-	outline_glyph(outlined_glyph_outer, outline_width)
+	outline_glyph(outlined_glyph_inner, -outline_width/2)
+	outline_glyph(outlined_glyph_outer, outline_width/2)
 	output_glyph = Glyph()
 	reverse_contour_pen = ReverseContourPen(output_glyph.getPen())
 	outlined_glyph_inner.draw(reverse_contour_pen)
@@ -457,14 +457,22 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 						copy_data_from_glyph(handle_line_glyphs[line_width][glyph_name], master.newGlyph(glyph_name + "_lines"), exclude=["unicodes"])
 						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name), exclude=["contours"])
 						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name + ".filled"), exclude=["unicodes"])
-						master.newGlyph(glyph_name + ".bounds")
+						master.newGlyph(glyph_name + ".bounds").width = font[glyph_name].width
 						bounds_pen = master.newGlyph(glyph_name + "_bounds").getPen()
 						bounds_pen.moveTo((0, font.info.descender))
 						bounds_pen.lineTo((0, font.info.ascender))
-						bounds_pen.lineTo((glyph.width, font.info.ascender))
-						bounds_pen.lineTo((glyph.width, font.info.descender))
+						bounds_pen.lineTo((font[glyph_name].width, font.info.ascender))
+						bounds_pen.lineTo((font[glyph_name].width, font.info.descender))
 						bounds_pen.closePath()
-						master.newGlyph(glyph_name + ".bounds.filled")
+						master.newGlyph(glyph_name + ".bounds.filled").width = font[glyph_name].width
+
+						default_glyph = master[glyph_name]
+						default_glyph.contours = []
+						default_glyph.components = []
+						for suffix in ["_lines", "_lines", "_outlined"]:
+							default_glyph.contours += master[glyph_name + suffix].contours[::1]
+						for suffix in ["_handles", "_points"]:
+							master[glyph_name].components += master[glyph_name + suffix].components[::1]
 
 					square(master.newGlyph("point"), (0, 0), point_size * drawing_scale_factor)
 					circle(master.newGlyph("handle"), (0, 0), handle_size * drawing_scale_factor, tension=0.66)
@@ -513,10 +521,3 @@ if __name__ == "__main__":
 	# stats.sort_stats(pstats.SortKey.TIME)
 	# stats.print_stats(10)
 	print((datetime.now() - start).total_seconds())
-
-
-# normalized_glyph = Glyph()
-# normalizing_pen = NormalizingPen(normalized_glyph.getPen())
-# glyph.draw(normalizing_pen)
-# glyph.clearContours()
-# normalized_glyph.draw(glyph.getPen())
