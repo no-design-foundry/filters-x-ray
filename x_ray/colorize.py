@@ -1,67 +1,47 @@
-import struct
+from fontTools.ttLib import TTFont, newTable
+from fontTools.ttLib.tables.C_O_L_R_ import LayerRecord
+from fontTools.ttLib.tables.C_P_A_L_ import Color
+from fontTools.colorLib import builder
 
-def hex_to_rgba(color_hex):
-    color_hex = color_hex.lstrip("#")
-    return tuple(int(color_hex[i:i+2], 16) for i in (0, 2, 4)) + (255,)
+# Load the font
+def hex_to_Color(value):
+    value = value.lstrip("#")
+    r, g, b, *a = tuple(int(value[i:i + 2], 16) for i in range(0, len(value), 2))
+    return Color(red=r, green=g, blue=b, alpha=a[0] if a else 255)
 
-def update_cpal_colors(font_path, output_path, palette_index, new_colors):
-    with open(font_path, 'rb') as font_file:
-        font_data = bytearray(font_file.read())
+# 0000000F
+def colorize(tt_font, glyph_order, outline_color, line_color, point_color, background_color="#00000010"):
+    cpal = newTable('CPAL')
+    cpal.version = 0
+    cpal.numPaletteEntries = 4
+    cpal.palettes = [
+        [
+            hex_to_Color(background_color),
+            hex_to_Color(outline_color),
+            hex_to_Color(line_color),
+            hex_to_Color(point_color),
+        ],  # Palette 1
+    ]
+    tt_font['CPAL'] = cpal
 
-    # Locate CPAL table
-    cpal_offset = locate_cpal_offset(font_data)
-    if cpal_offset is None:
-        print("CPAL table not found.")
-        return
+    # Create and populate the COLR table
 
-    # Read CPAL table header to find color records and palette offsets
-    version, num_palettes, num_color_records, color_record_offset = struct.unpack_from(">HHHH", font_data, cpal_offset)
-    palette_offset_array_offset = cpal_offset + 10  # Offset for palette array
+    color_layer_lists = {}
+    suffixes = [(1, "_outlined"), (2, "_lines"), (3, "_handles"), (3, "_points")]
+    filled_suffixes = [(1, ".filled"), (2, "_lines"), (3, "_handles"), (3, "_points")]
+    bounds_suffixes = [(0, "_bounds"), (1, "_outlined"), (2, "_lines"), (3, "_handles"), (3, "_points")]
+    bounds_filled_suffixes = [(0, "_bounds"), (1, ".filled"), (2, "_lines"), (3, "_handles"), (3, "_points")]
 
-    # Find the specific palette we need to modify
-    if palette_index >= num_palettes:
-        print(f"Palette index {palette_index} out of range (only {num_palettes} available).")
-        return
+    for glyph_name in glyph_order:
+        color_layer_lists[glyph_name] = [(glyph_name + suffix, index) for index, suffix in suffixes]
+        color_layer_lists[f"{glyph_name}.filled"] = [(glyph_name + suffix, index) for index, suffix in filled_suffixes]
+        color_layer_lists[f"{glyph_name}.bounds"] = [(glyph_name + suffix, index) for index, suffix in bounds_suffixes]
+        color_layer_lists[f"{glyph_name}.bounds.filled"] = [(glyph_name + suffix, index) for index, suffix in bounds_filled_suffixes]
 
-    palette_offset = struct.unpack_from(">H", font_data, palette_offset_array_offset + palette_index * 2)[0]
-    palette_start = cpal_offset + color_record_offset + palette_offset * 4
 
-    # Convert hex colors to RGBA format
-    new_rgba_colors = [hex_to_rgba(color) for color in new_colors]
+    colr = builder.buildCOLR(color_layer_lists)
 
-    # Update each color in the specified palette
-    for i, (r, g, b, a) in enumerate(new_rgba_colors):
-        if i >= num_color_records:
-            break
-        color_offset = palette_start + i * 4
-        font_data[color_offset:color_offset + 4] = bytes([r, g, b, a])
 
-    with open(output_path, 'wb') as modified_font_file:
-        modified_font_file.write(font_data)
-    
-    print(f"Updated CPAL palette colors saved to {output_path}")
+    tt_font['COLR'] = colr
 
-def locate_cpal_offset(font_data):
-    num_tables = struct.unpack_from(">H", font_data, 4)[0]
-    table_offset = 12
-    for _ in range(num_tables):
-        table_name = font_data[table_offset:table_offset + 4].decode()
-        if table_name == 'CPAL':
-            return struct.unpack_from(">I", font_data, table_offset + 8)[0]
-        table_offset += 16
-    return None
-
-# Example usage
-font_path = "0.ttf"
-output_path = "0_modified.ttf"
-palette_index = 0  # Index of the palette to update
-
-# Define colors in hex format (as strings) for the palette
-new_colors = [
-    "#FF5733",  # Background color
-    "#33FF57",  # Outline color
-    "#3357FF",  # Line color
-    "#FF33FF",  # Point color
-]
-
-update_cpal_colors(font_path, output_path, palette_index, new_colors)
+    # Save the modified font

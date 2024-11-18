@@ -19,7 +19,7 @@ try:
 	from .outline_glyph import outline_glyph
 	from .normalizing_pen import NormalizingPen
 	from .colorize import colorize
-except ImportError:
+except ModuleNotFoundError:
 	from outline_glyph import outline_glyph
 	from normalizing_pen import NormalizingPen
 	from colorize import colorize

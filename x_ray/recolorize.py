@@ -46,7 +46,6 @@ def update_palette_colors(font_data, cpal_offset, new_palettes, num_palette_entr
     stream.seek(color_offset)
     for palette in new_palettes:
         for color in palette[:colors_per_palette]:
-            print(color)
             stream.write(struct.pack('BBBB', *color))
     
     return stream.getvalue()
@@ -56,20 +55,21 @@ def save_modified_font(new_font_data, output_path):
     with open(output_path, 'wb') as f:
         f.write(new_font_data)
 
-font_path = '0.ttf'
-font_data = load_font_data(font_path)
-cpal_offset = get_table_offset(font_data, 'CPAL')
-palettes, version, num_palette_entries = read_cpal_table(font_data, cpal_offset)
+if __name__ == "__main__":
+    font_path = '0.ttf'
+    font_data = load_font_data(font_path)
+    cpal_offset = get_table_offset(font_data, 'CPAL')
+    palettes, version, num_palette_entries = read_cpal_table(font_data, cpal_offset)
 
-new_palettes = [[
-    (0, 0, 255, 255),
-    (0, 255, 0, 255),
-    (255, 0, 0, 255),
-    (0, 125, 255, 255),
-]]
+    new_palettes = [[
+        (0, 0, 255, 255),
+        (0, 255, 0, 255),
+        (255, 0, 0, 255),
+        (0, 125, 255, 255),
+    ]]
 
 
-new_font_data = update_palette_colors(font_data, cpal_offset, new_palettes, num_palette_entries)
+    new_font_data = update_palette_colors(font_data, cpal_offset, new_palettes, num_palette_entries)
 
-output_path = '0_modified.ttf'
-save_modified_font(new_font_data, output_path)
+    output_path = '0_modified.ttf'
+    save_modified_font(new_font_data, output_path)
