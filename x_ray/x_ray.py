@@ -353,15 +353,22 @@ def process_line(glyph, line_width):
 	return handle_line_layer
 
 def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0000"):
-	new_upm = 16_384
+	y_min = font.info.descender
+	y_max = font.info.ascender 
+	for bounds in [glyph.getBounds() for glyph in font]:
+		if bounds:
+			y_min = min(y_min, bounds[1])
+			y_max = max(y_max, bounds[3])
+	
+	new_upm = 16_384/2 # for extremely wide fonts like Zapfino must be smaller 16384
 	scale_factor = new_upm / font.info.unitsPerEm
+
 	drawing_scale_factor = scale_factor * (font.info.unitsPerEm / 1000)
 	for glyph in font:
 		scale_glyph(glyph, scale_factor)
 	font.info.unitsPerEm = new_upm
 	font.info.ascender *= scale_factor
 	font.info.descender *= scale_factor
-	font.info.capHeight *= scale_factor
 	font.info.xHeight *= scale_factor
 	for key in font.kerning.keys():
 		font.kerning[key] *= scale_factor
