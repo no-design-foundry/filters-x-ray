@@ -28,9 +28,9 @@ def colorize(tt_font, glyph_order, outline_color, line_color, point_color, backg
 
     color_layer_lists = {}
     suffixes = [(1, "_outlined"), (2, "_lines"), (3, "_handles"), (3, "_points")]
-    filled_suffixes = [(1, ".filled"), (2, "_lines"), (3, "_handles"), (3, "_points")]
+    filled_suffixes = [(1, "_filled"), (2, "_lines"), (3, "_handles"), (3, "_points")]
     bounds_suffixes = [(0, "_bounds"), (1, "_outlined"), (2, "_lines"), (3, "_handles"), (3, "_points")]
-    bounds_filled_suffixes = [(0, "_bounds"), (1, ".filled"), (2, "_lines"), (3, "_handles"), (3, "_points")]
+    bounds_filled_suffixes = [(0, "_bounds"), (1, "_filled"), (2, "_lines"), (3, "_handles"), (3, "_points")]
 
     for glyph_name in glyph_order:
         color_layer_lists[glyph_name] = [(glyph_name + suffix, index) for index, suffix in suffixes]

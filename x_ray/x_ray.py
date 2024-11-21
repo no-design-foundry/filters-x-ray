@@ -76,10 +76,10 @@ def line_shape(output_glyph, point_a, point_b, thickness):
 	y_offset = sin(angle) * thickness / 2
 
 	point_objects = [
-		Point(x_a + x_offset, y_a + y_offset, "line"),
-		Point(x_b + x_offset, y_b + y_offset, "line"),
-		Point(x_b - x_offset, y_b - y_offset, "line"),
 		Point(x_a - x_offset, y_a - y_offset, "line"),
+		Point(x_b - x_offset, y_b - y_offset, "line"),
+		Point(x_b + x_offset, y_b + y_offset, "line"),
+		Point(x_a + x_offset, y_a + y_offset, "line"),
 	]
 
 	contour = Contour()
@@ -463,7 +463,13 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 						copy_data_from_glyph(handle_glyphs[handle_size][glyph_name], master.newGlyph(glyph_name + "_handles"), exclude=["unicodes"])
 						copy_data_from_glyph(handle_line_glyphs[line_width][glyph_name], master.newGlyph(glyph_name + "_lines"), exclude=["unicodes"])
 						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name), exclude=["contours"])
-						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name + ".filled"), exclude=["unicodes"])
+						copy_data_from_glyph(font[glyph_name], master.newGlyph(glyph_name + "_filled"), exclude=["unicodes"])
+						
+						filled = master.newGlyph(glyph_name + ".filled")
+						filled.width = font[glyph_name].width
+						for suffix in ["_filled", "_lines", "_points", "_handles"]:
+							filled.components.append(Component(glyph_name + suffix, (1, 0, 0, 1, 0, 0)))
+
 						master.newGlyph(glyph_name + ".bounds").width = font[glyph_name].width
 						bounds_pen = master.newGlyph(glyph_name + "_bounds").getPen()
 						bounds_pen.moveTo((0, font.info.descender))
@@ -476,7 +482,7 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 						default_glyph = master[glyph_name]
 						default_glyph.contours = []
 						default_glyph.components = []
-						for suffix in ["_lines", "_lines", "_outlined"]:
+						for suffix in ["_lines", "_outlined"]:
 							default_glyph.contours += master[glyph_name + suffix].contours[::1]
 						for suffix in ["_handles", "_points"]:
 							master[glyph_name].components += master[glyph_name + suffix].components[::1]
