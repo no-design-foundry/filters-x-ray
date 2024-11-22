@@ -1,12 +1,11 @@
-from fontTools.pens.basePen import BasePen, AbstractPen
-from math import atan2, cos, sin, pi, hypot, sqrt
+from fontTools.pens.basePen import AbstractPen
+from math import atan2, cos, sin, pi, sqrt
 from fontTools.pens.reverseContourPen import ReverseContourPen
 from ufoLib2.objects.font import Font
 from ufoLib2.objects.point import Point
 from ufoLib2.objects.contour import Contour
 from ufoLib2.objects.glyph import Glyph
 from ufoLib2.objects.component import Component
-from copy import deepcopy
 import numpy as np
 from fontTools.designspaceLib import (
 	DesignSpaceDocument,
@@ -23,7 +22,6 @@ except ModuleNotFoundError:
 	from outline_glyph import outline_glyph
 	from normalizing_pen import NormalizingPen
 	from colorize import colorize
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def circle(layer, center, diameter, tension=1):
 	x, y = center
@@ -255,14 +253,12 @@ class XRayPen(AbstractPen):
 		self.point(last_point)
 
 	def addComponent(self, glyph_name, *args, **kwargs) -> None:
-		pass
-		# self.handle_line_layer.components.append(Component(glyph_name, *args, **kwargs))
-		# self.handle_layer.components.append(Component(glyph_name, *args, **kwargs))
+		self.layer.components.append(Component(glyph_name, *args, **kwargs))
 
-def duplicate_components(glyph_source, glyph_destination, suffix):
-	for component in glyph_source.components:
-		glyph_destination.components.append(Component(component.baseGlyph + suffix, component.transformation))
-
+def duplicate_components(glyph_destination, suffix):
+	for component in glyph_destination.components:
+		if component.baseGlyph not in ["handle", "point"]:
+			component.baseGlyph += suffix
 
 
 def add_features(font, output_font):
@@ -355,10 +351,14 @@ def process_line(glyph, line_width):
 def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0000"):
 	y_min = font.info.descender
 	y_max = font.info.ascender 
-	for bounds in [glyph.getBounds() for glyph in font]:
-		if bounds:
-			y_min = min(y_min, bounds[1])
-			y_max = max(y_max, bounds[3])
+	for glyph in font:
+		try:
+			bounds = glyph.getBounds()
+			if bounds:
+				y_min = min(y_min, bounds[1])
+				y_max = max(y_max, bounds[3])
+		except TypeError:
+			pass
 	
 	new_upm = 16_384/2 # for extremely wide fonts like Zapfino must be smaller 16384
 	scale_factor = new_upm / font.info.unitsPerEm
@@ -469,6 +469,9 @@ def x_ray(font, outline_color="#0000FF", line_color="#00FF00", point_color="#FF0
 						filled.width = font[glyph_name].width
 						for suffix in ["_filled", "_lines", "_points", "_handles"]:
 							filled.components.append(Component(glyph_name + suffix, (1, 0, 0, 1, 0, 0)))
+
+						for suffix in ["_lines", "_outlined", "_points", "_handles"]:
+							duplicate_components(master[glyph_name + suffix], suffix)
 
 						master.newGlyph(glyph_name + ".bounds").width = font[glyph_name].width
 						bounds_pen = master.newGlyph(glyph_name + "_bounds").getPen()
