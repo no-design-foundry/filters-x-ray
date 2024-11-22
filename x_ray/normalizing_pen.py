@@ -63,7 +63,11 @@ class NormalizingPen:
 	def curveTo(self, *points):
 		points = list(points)
 		extrema = bezier_extrema(self.last_point, *points)
-		handle_intersections = lineLineIntersections(self.last_point, points[0], *points[1:])
+
+		try:
+			handle_intersections = lineLineIntersections(self.last_point, points[0], *points[1:])
+		except ZeroDivisionError:
+			handle_intersections = []
 		
 		if self.last_point == points[0]:
 			points[0] = extend_handle(self.last_point, points[1], self.zero_handles_distance_fix)
@@ -76,7 +80,7 @@ class NormalizingPen:
 			for split in splits:
 				rounded_points = list(map(lambda point:(round(point[0]),round(point[1])), split[1:]))                
 				self.other_pen.curveTo(*rounded_points)
-		elif any([-.1 <= intersection.t1 <= 1.1 and -.1 <= intersection.t2 <= 1.1 for intersection in handle_intersections]):
+		elif handle_intersections and any([-.1 <= intersection.t1 <= 1.1 and -.1 <= intersection.t2 <= 1.1 for intersection in handle_intersections]):
 			splits = splitCubicAtT(self.last_point, *points, .5)
 			for split in splits:
 				rounded_points = list(map(lambda point:(round(point[0]),round(point[1])), split[1:]))                
