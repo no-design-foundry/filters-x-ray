@@ -100,3 +100,6 @@ class NormalizingPen:
 
 	def addComponent(self, baseGlyphName, transformation):
 		self.other_pen.addComponent(baseGlyphName, transformation)
+
+	def endPath(self):
+		self.other_pen.endPath()
